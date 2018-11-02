@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2013-2015, Roland Bock
+* Copyright (c) 2013 - 2017, Roland Bock, Frank Park, Aaron Bishop
 * All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without modification,
@@ -24,23 +24,65 @@
 * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef SQLPP11_EXCEPTION_H
-#define SQLPP11_EXCEPTION_H
+#pragma once
 
-#include <stdexcept>
+#include <experimental/coroutine>
 
-namespace sqlpp
+struct resumable_function
 {
-  class exception : public std::runtime_error
-  {
-  public:
-    exception(const std::string& what_arg) : std::runtime_error(what_arg)
-    {
-    }
-    exception(const char* what_arg) : std::runtime_error(what_arg)
-    {
-    }
-  };
-}  // namespace sqlpp
+	struct promise_type
+	{
+		resumable_function get_return_object()
+		{
+			return resumable_function(std::experimental::coroutine_handle<promise_type>::from_promise(*this));
+		}
 
-#endif
+		auto initial_suspend()
+		{
+			return std::experimental::suspend_never{};
+		}
+
+		auto final_suspend()
+		{
+			return std::experimental::suspend_always{};
+		}
+
+		auto return_void()
+		{
+		}
+	};
+
+	std::experimental::coroutine_handle<promise_type> _coroutine = nullptr;
+
+	explicit resumable_function(std::experimental::coroutine_handle<promise_type> coroutine)
+		: _coroutine(coroutine)
+	{
+	}
+
+	~resumable_function()
+	{
+		if (_coroutine)
+		{
+			_coroutine.destroy();
+		}
+	}
+
+	void resume()
+	{
+		_coroutine.resume();
+	}
+
+	resumable_function() = default;
+	resumable_function(resumable_function const&) = delete;
+	resumable_function& operator= (resumable_function const&) = delete;
+
+	resumable_function(resumable_function && other)
+		: _coroutine(std::move(other._coroutine))
+	{
+	}
+
+	resumable_function& operator=(resumable_function&& other)
+	{
+		_coroutine = std::move(other._coroutine);
+	}
+};

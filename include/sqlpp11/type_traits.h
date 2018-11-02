@@ -538,6 +538,30 @@ namespace sqlpp
 
   template <typename Db>
   using serializer_context_of = typename serializer_context_of_impl<Db>::type;
+
+  template<typename F, typename... Args>
+  struct is_invocable
+  {
+    template<class U> static auto test(U* p) -> decltype((*p)(std::declval<Args>()...), void(), std::true_type());
+    template<class U> static auto test(...) -> decltype(std::false_type());
+
+    typedef decltype(test<F>(0)) type;
+    static constexpr bool value = decltype(test<F>(0))::value;
+  };
+
+  template<class F, class... ArgTypes>
+#if __cplusplus > 201402L
+  using invoke_result = std::invoke_result<F, ArgTypes...>;
+#else
+  using invoke_result = std::result_of<F(ArgTypes...)>;
+#endif
+
+  template<class F, class... ArgTypes>
+  using invoke_result_t = typename invoke_result<F,ArgTypes...>::type;
+
+  template<class F, class... ArgTypes>
+  using invoke_result_t = typename invoke_result<F,ArgTypes...>::type;
+  
 }  // namespace sqlpp
 
 #endif

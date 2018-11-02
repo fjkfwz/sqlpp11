@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2013-2015, Roland Bock
+* Copyright (c) 2013 - 2015, Roland Bock
 * All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without modification,
@@ -24,23 +24,17 @@
 * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef SQLPP11_EXCEPTION_H
-#define SQLPP11_EXCEPTION_H
+#ifndef SQLPP_MOCK_CONFIG_H
+#define SQLPP_MOCK_CONFIG_H
 
-#include <stdexcept>
+#include <string>
 
-namespace sqlpp
+template<bool enforceNullResultTreatment>
+struct MockDbT;
+
+struct MockConfig
 {
-  class exception : public std::runtime_error
-  {
-  public:
-    exception(const std::string& what_arg) : std::runtime_error(what_arg)
-    {
-    }
-    exception(const char* what_arg) : std::runtime_error(what_arg)
-    {
-    }
-  };
-}  // namespace sqlpp
+  typedef MockDbT<false> connection;
+};
 
 #endif
