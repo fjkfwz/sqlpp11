@@ -1,28 +1,30 @@
 /*
- * Copyright (c) 2013 - 2017, Roland Bock, Frank Park
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *
- *   Redistributions of source code must retain the above copyright notice, this
- *   list of conditions and the following disclaimer.
- *
- *   Redistributions in binary form must reproduce the above copyright notice, this
- *   list of conditions and the following disclaimer in the documentation and/or
- *   other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+* Copyright (c) 2013 - 2017, Roland Bock, Frank Park, Aaron Bishop
+* All rights reserved.
+*
+* Redistribution and use in source and binary forms, with or without modification,
+* are permitted provided that the following conditions are met:
+*
+*   Redistributions of source code must retain the above copyright notice, this
+*   list of conditions and the following disclaimer.
+*
+*   Redistributions in binary form must reproduce the above copyright notice, this
+*   list of conditions and the following disclaimer in the documentation and/or
+*   other materials provided with the distribution.
+*
+* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+* ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+* WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+* DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+* ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+* (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+* LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+* ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+* (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+* SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#pragma once
 
 #ifndef SQLPP_CONNECTION_POOL_H
 #define SQLPP_CONNECTION_POOL_H
@@ -33,177 +35,188 @@
 #include <memory>
 #include <iostream>
 #include <chrono>
+#include <exception>
+#include <future>
 #include <type_traits>
 #include <sqlpp11/exception.h>
 #include <sqlpp11/pool_connection.h>
 
 namespace sqlpp
 {
-  namespace reconnect_policy
+namespace connection_validator
+{
+struct automatic
+{
+  template<typename Connection>
+  void validate(Connection* connection)
   {
-    struct auto_reconnect
+    if (!connection->is_valid())
     {
-      template <typename Connection>
-      void operator()(Connection* connection)
-      {
-        if (!connection->is_valid())
-          connection->reconnect();
-      }
-      template <typename Connection>
-      void clean(Connection* connection)
-      {
-      }
-    };
-
-    class periodic_reconnect
-    {
-    private:
-      std::chrono::seconds revalidate_after;
-      std::unordered_map<void*, std::chrono::time_point<std::chrono::system_clock>> last_checked;
-
-    public:
-      periodic_reconnect(const std::chrono::seconds r = std::chrono::seconds(28800))  // default wait_timeout in MySQL
-          : revalidate_after(r), last_checked()
-      {
-      }
-
-      template <typename Connection>
-      void operator()(Connection* con)
-      {
-        auto last = last_checked.find(con);
-        auto now = std::chrono::system_clock::now();
-        if (last == last_checked.end())
-        {
-          if (!con->is_valid())
-          {
-            con->reconnect();
-          }
-          last_checked.emplace_hint(last, con, now);
-        }
-        else if (now - last->second > revalidate_after)
-        {
-          if (!con->is_valid())
-          {
-            con->reconnect();
-          }
-          last = now;
-        }
-      }
-      template <typename Connection>
-      void clean(Connection* con)
-      {
-        auto itr = last_checked.find(con);
-        if (itr != last_checked.end())
-        {
-          last_checked.erase(itr);
-        }
-      }
-    };
-
-    struct never_reconnect
-    {
-      template <typename Connection>
-      void operator()(Connection*)
-      {
-      }
-      template <typename Connection>
-      void clean(Connection*)
-      {
-      }
-    };
-  }
-
-  template <typename Connection_config,
-            typename Reconnect_policy = reconnect_policy::auto_reconnect,
-            typename Connection = typename std::enable_if<std::is_class<typename Connection_config::connection>::value,
-                                                          typename Connection_config::connection>::type>
-  class connection_pool
-  {
-    friend pool_connection<Connection_config, Reconnect_policy, Connection>;
-
-  private:
-    std::mutex connection_pool_mutex;
-    const std::shared_ptr<Connection_config> config;
-    size_t maximum_pool_size = 0;
-    std::stack<std::unique_ptr<Connection>> free_connections;
-    Reconnect_policy reconnect_policy;
-
-    void free_connection(std::unique_ptr<Connection>& connection)
-    {
-      std::lock_guard<std::mutex> lock(connection_pool_mutex);
-      if (free_connections.size() >= maximum_pool_size)
-      {
-        // Exceeds default size, do nothign and let connection self destroy.
-      }
-      else
-      {
-        if (connection.get())
-        {
-          if (connection->is_valid())
-          {
-            free_connections.push(std::move(connection));
-          }
-          else
-          {
-            throw sqlpp::exception("Trying to free a connection with incompatible config.");
-          }
-        }
-        else
-        {
-          throw sqlpp::exception("Trying to free an empty connection.");
-        }
-      }
-    }
-
-  public:
-    connection_pool(const std::shared_ptr<Connection_config>& config, size_t pool_size)
-        : config(config), maximum_pool_size(pool_size), reconnect_policy(Reconnect_policy())
-    {
-    }
-    ~connection_pool() = default;
-    connection_pool(const connection_pool&) = delete;
-    connection_pool(connection_pool&& other)
-        : config(std::move(other.config)),
-          maximum_pool_size(std::move(other.maximum_pool_size)),
-          reconnect_policy(std::move(other.reconnect_policy))
-    {
-    }
-    connection_pool& operator=(const connection_pool&) = delete;
-    connection_pool& operator=(connection_pool&&) = delete;
-
-    pool_connection<Connection_config, Reconnect_policy, Connection> get_connection()
-    {
-      std::lock_guard<std::mutex> lock(connection_pool_mutex);
-      if (!free_connections.empty())
-      {
-        auto connection = std::move(free_connections.top());
-        free_connections.pop();
-        return pool_connection<Connection_config, Reconnect_policy, Connection>(connection, this);
-      }
-
       try
       {
-        auto c = std::unique_ptr<Connection>(new Connection(*(config.get())));
-        return pool_connection<Connection_config, Reconnect_policy, Connection>(c, this);
+        connection->reconnect();
+      }
+      catch (const sqlpp::exception&)
+      {
+        throw sqlpp::exception("Failed to reconnect to database.");
+      }
+    }
+  }
+
+  template<typename Connection>
+  void deregister(Connection*) {}
+};
+
+class periodic
+{
+ private:
+  std::chrono::seconds revalidate_interval;
+  std::unordered_map<void*, std::chrono::time_point<std::chrono::system_clock>> last_checked;
+
+ public:
+  periodic(const std::chrono::seconds r = std::chrono::seconds(28800)) //default wait_timeout in MySQL
+    : revalidate_interval(r), last_checked() {}
+
+  template<typename Connection>
+  void validate(Connection* connection)
+  {
+    auto last = last_checked.find(connection);
+    auto now = std::chrono::system_clock::now();
+    if (last == last_checked.end())
+    {
+      last_checked.emplace_hint(last, connection, now);
+    }
+
+    if (now - last->second < revalidate_interval)
+    {
+      return;
+    }
+
+    if (!connection->is_valid())
+    {
+      try
+      {
+        connection->reconnect();
       }
       catch (const sqlpp::exception& e)
       {
-        std::cerr << "Failed to spawn a new connection." << std::endl;
-        std::cerr << e.what() << std::endl;
-        throw;
+        throw sqlpp::exception("Failed to reconnect to database.");
       }
     }
-  };
 
-  template <typename Connection_config,
-            typename Reconnect_policy = reconnect_policy::auto_reconnect,
-            typename Connection = typename std::enable_if<std::is_class<typename Connection_config::connection>::value,
-                                                          typename Connection_config::connection>::type>
-  connection_pool<Connection_config, Reconnect_policy, Connection> make_connection_pool(
-      const std::shared_ptr<Connection_config>& config, size_t max_pool_size)
-  {
-    return connection_pool<Connection_config, Reconnect_policy, Connection>(config, max_pool_size);
+    last = now;
   }
+
+  template<typename Connection>
+  void deregister(Connection* con)
+  {
+    auto itr = last_checked.find(con);
+    if (itr != last_checked.end())
+    {
+      last_checked.erase(itr);
+    }
+  }
+};
+
+struct none
+{
+  template<typename Connection>
+  void validate(Connection*) {}
+
+  template<typename Connection>
+  void deregister(Connection*) {}
+};
+}
+
+template<typename Connection_config, typename Connection_validator = connection_validator::automatic,
+  typename Connection = typename std::enable_if<std::is_class<typename Connection_config::connection>::value, typename Connection_config::connection>::type,
+  typename Connection_pool = connection_pool<Connection, Connection_validator, Connection_config>>
+Connection_pool make_connection_pool(const std::shared_ptr<Connection_config>& config, size_t max_pool_size)
+{
+  return Connection_pool(config, max_pool_size);
+}
+
+template <typename Connection,
+  typename Connection_validator = connection_validator::automatic,
+  typename Connection_config = typename std::enable_if<std::is_class<typename Connection::connection_config>::value, typename Connection::connection_config>::type>
+class connection_pool
+{
+ private:
+  std::mutex connection_pool_mutex;
+  const std::shared_ptr<Connection_config> config;
+  size_t maximum_pool_size = 0;
+  std::stack<std::unique_ptr<Connection>> free_connections;
+  Connection_validator connection_validator;
+
+ public:
+  connection_pool(const std::shared_ptr<Connection_config>& config, size_t pool_size)
+    : config(config), maximum_pool_size(pool_size), connection_validator(Connection_validator()) {}
+  ~connection_pool() = default;
+  connection_pool(const connection_pool&) = delete;
+  connection_pool(connection_pool&& other)
+    : config(std::move(other.config)), maximum_pool_size(std::move(other.maximum_pool_size)),
+      connection_validator(std::move(other.connection_validator)) {}
+  connection_pool& operator=(const connection_pool&) = delete;
+  connection_pool& operator=(connection_pool&&) = delete;
+
+  template <typename Pool_connection = pool_connection<Connection_config, Connection_validator, Connection, connection_pool>>
+  Pool_connection get_connection()
+  {
+    std::lock_guard<std::mutex> lock(connection_pool_mutex);
+    while (true)
+    {
+      try
+      {
+        if (!free_connections.empty())
+        {
+          auto connection = std::move(free_connections.top());
+          free_connections.pop();
+          connection_validator.validate(connection.get());
+
+          return Pool_connection(std::move(connection), this);
+        }
+        else
+        {
+          break;
+        }
+      }
+      catch (const sqlpp::exception&)
+      {
+        throw sqlpp::exception("Failed to retrieve a valid connection.");
+      }
+    }
+
+    try
+    {
+      return Pool_connection(std::move(std::make_unique<Connection>(config)), this);
+    }
+    catch (const sqlpp::exception&)
+    {
+      throw sqlpp::exception("Failed to spawn a new connection.");
+    }
+  }
+
+  void free_connection(std::unique_ptr<Connection>& connection)
+  {
+    std::lock_guard<std::mutex> lock(connection_pool_mutex);
+    if (free_connections.size() >= maximum_pool_size)
+    {
+      // Exceeds default size, deregister left over info in the connection_validator and let connection self destroy.
+      connection_validator.deregister(connection.get());
+    }
+    else
+    {
+      if (connection.get())
+      {
+        free_connections.push(std::move(connection));
+      }
+      else
+      {
+        throw sqlpp::exception("Trying to free an empty connection.");
+      }
+    }
+  }
+};
 }
 
 #endif

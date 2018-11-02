@@ -26,7 +26,9 @@
 #ifndef SQLPP_MOCK_DB_H
 #define SQLPP_MOCK_DB_H
 
+#include "MockConfig.h"
 #include <iostream>
+#include <memory>
 #include <sqlpp11/connection.h>
 #include <sqlpp11/transaction.h>
 #include <sqlpp11/data_types/no_value.h>
@@ -117,6 +119,12 @@ struct MockDbT : public sqlpp::connection
     }
   };
 
+  MockDbT() = default;
+
+  MockDbT(const std::shared_ptr<MockConfig>& config)
+  {
+  }
+
   // Directly executed statements start here
   template <typename T>
   auto _run(const T& t, ::sqlpp::consistent_t) -> decltype(t._run(*this))
@@ -136,6 +144,15 @@ struct MockDbT : public sqlpp::connection
   size_t execute(const std::string&)
   {
     return 0;
+  }
+
+  bool is_valid()
+  {
+    return true;
+  }
+  
+  void reconnect()
+  {
   }
 
   template <
